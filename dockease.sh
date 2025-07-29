@@ -208,25 +208,27 @@ show_main_menu() {
 
     print_color "$WHITE" "  ${BUILD_ICON} Build Management:"
     echo "   11) Add build configuration"
-    echo "   12) One-click rebuild"
-    echo "   13) Manage build configs"
+    echo "   12) Enhanced one-click update"
+    echo "   13) One-click rebuild (legacy)"
+    echo "   14) Manage build configs"
+    echo "   15) Scheduled updates"
     echo
 
     print_color "$WHITE" "  ${CLEAN_ICON} System Cleanup:"
-    echo "   14) Clean dangling images"
-    echo "   15) System prune"
-    echo "   16) Full cleanup"
+    echo "   16) Clean dangling images"
+    echo "   17) System prune"
+    echo "   18) Full cleanup"
     echo
 
     print_color "$WHITE" "  ${GEAR_ICON} Settings:"
-    echo "   17) View configuration"
-    echo "   18) Reset configuration"
-    echo "   19) View logs"
+    echo "   19) View configuration"
+    echo "   20) Reset configuration"
+    echo "   21) View logs"
     echo
 
     print_color "$WHITE" "  ${INFO} Help & Info:"
-    echo "   20) Show help"
-    echo "   21) About DockEase"
+    echo "   22) Show help"
+    echo "   23) About DockEase"
     echo
 
     print_color "$DIM" "   0) Exit"
@@ -1788,7 +1790,219 @@ edit_build_config() {
     fi
 }
 
-# One-click update container
+# {{ AURA-X:
+# Action: "Added"
+# Task_ID: "#DOCKEASE-001"
+# Timestamp: "2025-07-29T09:57:17+08:00"
+# Authoring_Role: "LD"
+# Principle_Applied: "SOLID-S (Single Responsibility Principle)"
+# Approval: "inch stop (ID:2025-07-29T09:57:17+08:00)"
+#}}
+# {{START_MODIFICATIONS}}
+
+# Enhanced one-click update with batch support
+enhanced_one_click_update() {
+    print_header "Enhanced One-Click Update"
+
+    if [[ ! -f "$CONFIG_FILE" ]] || ! validate_config; then
+        print_error "No valid configuration file found"
+        return 1
+    fi
+
+    if ! command -v jq &> /dev/null; then
+        print_error "jq is required for update functionality"
+        return 1
+    fi
+
+    # List available configurations
+    local containers
+    containers=$(jq -r '.containers | keys[]' "$CONFIG_FILE" 2>/dev/null)
+
+    if [[ -z "$containers" ]]; then
+        print_warning "No container configurations found"
+        print_info "Use 'Add container configuration' to create configurations first"
+        return 0
+    fi
+
+    echo "Available configurations:"
+    local -a config_array
+    local count=1
+
+    while IFS= read -r container; do
+        config_array+=("$container")
+        local image=$(jq -r ".containers.\"$container\".image" "$CONFIG_FILE")
+        local description=$(jq -r ".containers.\"$container\".description // \"No description\"" "$CONFIG_FILE")
+
+        echo "  $count) $container"
+        echo "     Image: $image"
+        echo "     Description: $description"
+        echo
+        ((count++))
+    done <<< "$containers"
+
+    echo "  $count) Update ALL containers"
+    echo "  0) Cancel"
+    echo
+
+    echo -n "Select configuration to update [0-$count]: "
+    read -r selection
+
+    if [[ "$selection" == "0" ]]; then
+        print_info "Operation cancelled"
+        return 0
+    fi
+
+    # Handle batch update
+    if [[ "$selection" == "$count" ]]; then
+        echo
+        print_warning "This will update ALL configured containers!"
+        echo -n "Are you sure? (y/N): "
+        read -r confirm
+        if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+            print_info "Batch update cancelled"
+            return 0
+        fi
+
+        # Update all containers
+        local total_containers=${#config_array[@]}
+        local success_count=0
+
+        for container in "${config_array[@]}"; do
+            echo
+            echo "═══════════════════════════════════════════════════════════════"
+            print_info "Updating container: $container"
+            if update_single_container "$container"; then
+                ((success_count++))
+            fi
+        done
+
+        echo
+        echo "═══════════════════════════════════════════════════════════════"
+        print_info "Batch update completed: $success_count/$total_containers containers updated successfully"
+        return 0
+    fi
+
+    # Handle single container update
+    if [[ ! "$selection" =~ ^[0-9]+$ ]] || [[ $selection -lt 1 ]] || [[ $selection -gt ${#config_array[@]} ]]; then
+        print_error "Invalid selection"
+        return 1
+    fi
+
+    local selected_container="${config_array[$((selection-1))]}"
+    update_single_container "$selected_container"
+}
+
+# Update a single container (extracted for reuse)
+update_single_container() {
+    local container_name="$1"
+
+    # Get configuration details
+    local image=$(jq -r ".containers.\"$container_name\".image" "$CONFIG_FILE")
+    local run_cmd=$(jq -r ".containers.\"$container_name\".run_cmd" "$CONFIG_FILE")
+
+    if [[ -z "$run_cmd" || "$run_cmd" == "null" ]]; then
+        print_error "No run command configured for: $container_name"
+        return 1
+    fi
+
+    # Show update plan
+    echo
+    echo "───────────────────────────────────────────────────────────────"
+    echo "Update Plan for: $container_name"
+    echo "  1. Pull latest image: $image"
+    echo "  2. Stop existing container"
+    echo "  3. Remove existing container"
+    echo "  4. Start new container"
+    echo
+    echo "Run command: $run_cmd"
+    echo
+
+    # Start update process
+    echo "───────────────────────────────────────────────────────────────"
+    echo "Starting update process for: $container_name"
+    log_info "Starting update process for: $container_name"
+
+    local update_success=true
+    local step=1
+
+    # Step 1: Pull latest image
+    echo "[$step/4] Pulling latest image: $image"
+    if docker pull "$image"; then
+        print_success "Image pulled successfully: $image"
+        log_info "Image pulled: $image"
+    else
+        print_error "Failed to pull image: $image"
+        log_error "Failed to pull image: $image"
+        update_success=false
+    fi
+    ((step++))
+
+    # Step 2: Stop existing container
+    echo "[$step/4] Stopping existing container..."
+    if docker ps -q -f "name=^${container_name}$" | grep -q .; then
+        if docker stop "$container_name" &>/dev/null; then
+            print_success "Container stopped: $container_name"
+        else
+            print_warning "Failed to stop container: $container_name (continuing anyway)"
+        fi
+    else
+        echo "No running container found: $container_name"
+    fi
+    ((step++))
+
+    # Step 3: Remove existing container
+    echo "[$step/4] Removing existing container..."
+    if docker ps -a -q -f "name=^${container_name}$" | grep -q .; then
+        if docker rm "$container_name" &>/dev/null; then
+            print_success "Container removed: $container_name"
+        else
+            print_error "Failed to remove container: $container_name"
+            update_success=false
+        fi
+    else
+        echo "No existing container found: $container_name"
+    fi
+    ((step++))
+
+    # Step 4: Start new container
+    if [[ "$update_success" == "true" ]]; then
+        echo "[$step/4] Starting new container..."
+        echo "Command: $run_cmd"
+
+        if eval "$run_cmd"; then
+            print_success "Container started successfully: $container_name"
+            log_info "Container started: $container_name"
+        else
+            print_error "Failed to start container: $container_name"
+            log_error "Failed to start container: $container_name - command: $run_cmd"
+            update_success=false
+        fi
+    else
+        echo "[$step/4] Skipping container start due to previous errors"
+    fi
+
+    # Final result
+    echo
+    echo "───────────────────────────────────────────────────────────────"
+    if [[ "$update_success" == "true" ]]; then
+        print_success "Update completed successfully: $container_name"
+        log_info "Update completed successfully for: $container_name"
+
+        # Show container info if running
+        if docker ps -q -f "name=^${container_name}$" | grep -q .; then
+            echo
+            echo "Container information:"
+            docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" -f "name=^${container_name}$"
+        fi
+        return 0
+    else
+        print_error "Update failed: $container_name"
+        echo "Check logs for details: tail -f $LOG_FILE"
+        return 1
+    fi
+}
+
+# Original one-click update (kept for compatibility)
 one_click_rebuild() {
     print_header "One-Click Update Container"
 
@@ -1956,6 +2170,391 @@ one_click_rebuild() {
     else
         print_error "Update failed: $selected_container"
         echo "Check logs for details: tail -f $LOG_FILE"
+    fi
+}
+
+# {{ AURA-X:
+# Action: "Added"
+# Task_ID: "#DOCKEASE-002"
+# Timestamp: "2025-07-29T09:57:17+08:00"
+# Authoring_Role: "LD"
+# Principle_Applied: "SOLID-S (Single Responsibility Principle)"
+# Approval: "inch stop (ID:2025-07-29T09:57:17+08:00)"
+#}}
+# {{START_MODIFICATIONS}}
+
+# Scheduled update management
+manage_scheduled_updates() {
+    print_header "Scheduled Update Management"
+
+    while true; do
+        echo
+        print_color "$WHITE" "Scheduled Update Options:"
+        echo "  1) View current scheduled updates"
+        echo "  2) Add new scheduled update"
+        echo "  3) Remove scheduled update"
+        echo "  4) Enable/Disable scheduled updates"
+        echo "  5) Test scheduled update"
+        echo "  0) Back to main menu"
+        echo
+
+        echo -n "Select option [0-5]: "
+        read -r choice
+
+        case $choice in
+            0)
+                return 0
+                ;;
+            1)
+                view_scheduled_updates
+                ;;
+            2)
+                add_scheduled_update
+                ;;
+            3)
+                remove_scheduled_update
+                ;;
+            4)
+                toggle_scheduled_updates
+                ;;
+            5)
+                test_scheduled_update
+                ;;
+            *)
+                print_error "Invalid option: $choice"
+                ;;
+        esac
+
+        echo
+        read -p "Press Enter to continue..."
+    done
+}
+
+# View current scheduled updates
+view_scheduled_updates() {
+    print_header "Current Scheduled Updates"
+
+    # Check if crontab exists
+    if ! crontab -l 2>/dev/null | grep -q "dockease"; then
+        print_warning "No DockEase scheduled updates found"
+        return 0
+    fi
+
+    echo "Current DockEase cron jobs:"
+    echo
+    crontab -l 2>/dev/null | grep "dockease" | while read -r line; do
+        echo "  $line"
+    done
+    echo
+
+    print_info "Cron schedule format: minute hour day month weekday command"
+    print_info "Examples:"
+    print_info "  0 2 * * * = Daily at 2:00 AM"
+    print_info "  0 2 * * 0 = Weekly on Sunday at 2:00 AM"
+    print_info "  0 2 1 * * = Monthly on 1st at 2:00 AM"
+}
+
+# Add new scheduled update
+add_scheduled_update() {
+    print_header "Add Scheduled Update"
+
+    # Check if script path is available
+    local script_path
+    if [[ -n "${BASH_SOURCE[0]}" ]]; then
+        script_path="$(realpath "${BASH_SOURCE[0]}")"
+    else
+        echo -n "Enter full path to dockease.sh: "
+        read -r script_path
+        if [[ ! -f "$script_path" ]]; then
+            print_error "Script file not found: $script_path"
+            return 1
+        fi
+    fi
+
+    # List available configurations
+    if [[ ! -f "$CONFIG_FILE" ]] || ! validate_config; then
+        print_error "No valid configuration file found"
+        return 1
+    fi
+
+    local containers
+    containers=$(jq -r '.containers | keys[]' "$CONFIG_FILE" 2>/dev/null)
+
+    if [[ -z "$containers" ]]; then
+        print_warning "No container configurations found"
+        print_info "Use 'Add container configuration' to create configurations first"
+        return 0
+    fi
+
+    echo "Available containers for scheduled updates:"
+    local -a config_array
+    local count=1
+
+    while IFS= read -r container; do
+        config_array+=("$container")
+        echo "  $count) $container"
+        ((count++))
+    done <<< "$containers"
+
+    echo "  $count) ALL containers"
+    echo "  0) Cancel"
+    echo
+
+    echo -n "Select container [0-$count]: "
+    read -r selection
+
+    if [[ "$selection" == "0" ]]; then
+        print_info "Operation cancelled"
+        return 0
+    fi
+
+    local target_container
+    if [[ "$selection" == "$count" ]]; then
+        target_container="ALL"
+    elif [[ "$selection" =~ ^[0-9]+$ ]] && [[ $selection -ge 1 ]] && [[ $selection -le ${#config_array[@]} ]]; then
+        target_container="${config_array[$((selection-1))]}"
+    else
+        print_error "Invalid selection"
+        return 1
+    fi
+
+    # Get schedule
+    echo
+    echo "Select update frequency:"
+    echo "  1) Daily at 2:00 AM"
+    echo "  2) Weekly (Sunday at 2:00 AM)"
+    echo "  3) Monthly (1st day at 2:00 AM)"
+    echo "  4) Custom cron expression"
+    echo
+
+    echo -n "Select frequency [1-4]: "
+    read -r freq_choice
+
+    local cron_schedule
+    case $freq_choice in
+        1)
+            cron_schedule="0 2 * * *"
+            ;;
+        2)
+            cron_schedule="0 2 * * 0"
+            ;;
+        3)
+            cron_schedule="0 2 1 * *"
+            ;;
+        4)
+            echo -n "Enter custom cron expression (minute hour day month weekday): "
+            read -r cron_schedule
+            ;;
+        *)
+            print_error "Invalid frequency choice"
+            return 1
+            ;;
+    esac
+
+    # Create cron job
+    local cron_comment="# DockEase scheduled update for $target_container"
+    local cron_command
+
+    if [[ "$target_container" == "ALL" ]]; then
+        cron_command="$cron_schedule $script_path --scheduled-update-all >> /tmp/dockease-cron.log 2>&1"
+    else
+        cron_command="$cron_schedule $script_path --scheduled-update \"$target_container\" >> /tmp/dockease-cron.log 2>&1"
+    fi
+
+    # Add to crontab
+    (crontab -l 2>/dev/null; echo "$cron_comment"; echo "$cron_command") | crontab -
+
+    if [[ $? -eq 0 ]]; then
+        print_success "Scheduled update added successfully"
+        echo "Schedule: $cron_schedule"
+        echo "Target: $target_container"
+        echo "Log file: /tmp/dockease-cron.log"
+    else
+        print_error "Failed to add scheduled update"
+        return 1
+    fi
+}
+
+# {{END_MODIFICATIONS}}
+
+# Remove scheduled update
+remove_scheduled_update() {
+    print_header "Remove Scheduled Update"
+
+    # Get current DockEase cron jobs
+    local cron_jobs
+    cron_jobs=$(crontab -l 2>/dev/null | grep -n "dockease")
+
+    if [[ -z "$cron_jobs" ]]; then
+        print_warning "No DockEase scheduled updates found"
+        return 0
+    fi
+
+    echo "Current DockEase scheduled updates:"
+    echo
+
+    local -a job_lines
+    local count=1
+
+    while IFS= read -r line; do
+        local line_num=$(echo "$line" | cut -d: -f1)
+        local job_content=$(echo "$line" | cut -d: -f2-)
+        job_lines+=("$line_num")
+        echo "  $count) $job_content"
+        ((count++))
+    done <<< "$cron_jobs"
+
+    echo "  0) Cancel"
+    echo
+
+    echo -n "Select job to remove [0-$((count-1))]: "
+    read -r selection
+
+    if [[ "$selection" == "0" ]]; then
+        print_info "Operation cancelled"
+        return 0
+    fi
+
+    if [[ ! "$selection" =~ ^[0-9]+$ ]] || [[ $selection -lt 1 ]] || [[ $selection -gt ${#job_lines[@]} ]]; then
+        print_error "Invalid selection"
+        return 1
+    fi
+
+    local target_line="${job_lines[$((selection-1))]}"
+
+    # Remove the job and its comment
+    local temp_cron=$(mktemp)
+    crontab -l 2>/dev/null | sed "${target_line}d;$((target_line-1))d" > "$temp_cron"
+
+    if crontab "$temp_cron"; then
+        print_success "Scheduled update removed successfully"
+    else
+        print_error "Failed to remove scheduled update"
+    fi
+
+    rm -f "$temp_cron"
+}
+
+# Toggle scheduled updates (enable/disable all)
+toggle_scheduled_updates() {
+    print_header "Enable/Disable Scheduled Updates"
+
+    # Check current status
+    local active_jobs
+    active_jobs=$(crontab -l 2>/dev/null | grep -v "^#" | grep "dockease" | wc -l)
+    local disabled_jobs
+    disabled_jobs=$(crontab -l 2>/dev/null | grep "^#.*dockease" | wc -l)
+
+    echo "Current status:"
+    echo "  Active jobs: $active_jobs"
+    echo "  Disabled jobs: $disabled_jobs"
+    echo
+
+    if [[ $active_jobs -gt 0 ]]; then
+        echo -n "Disable all scheduled updates? (y/N): "
+        read -r confirm
+        if [[ "$confirm" =~ ^[Yy]$ ]]; then
+            # Disable by commenting out
+            local temp_cron=$(mktemp)
+            crontab -l 2>/dev/null | sed 's/^\([^#].*dockease.*\)$/#\1/' > "$temp_cron"
+            if crontab "$temp_cron"; then
+                print_success "All scheduled updates disabled"
+            else
+                print_error "Failed to disable scheduled updates"
+            fi
+            rm -f "$temp_cron"
+        fi
+    elif [[ $disabled_jobs -gt 0 ]]; then
+        echo -n "Enable all scheduled updates? (y/N): "
+        read -r confirm
+        if [[ "$confirm" =~ ^[Yy]$ ]]; then
+            # Enable by uncommenting
+            local temp_cron=$(mktemp)
+            crontab -l 2>/dev/null | sed 's/^#\(.*dockease.*\)$/\1/' > "$temp_cron"
+            if crontab "$temp_cron"; then
+                print_success "All scheduled updates enabled"
+            else
+                print_error "Failed to enable scheduled updates"
+            fi
+            rm -f "$temp_cron"
+        fi
+    else
+        print_info "No scheduled updates found"
+    fi
+}
+
+# Test scheduled update
+test_scheduled_update() {
+    print_header "Test Scheduled Update"
+
+    echo "This will run a test update to verify the scheduled update functionality."
+    echo
+    echo -n "Proceed with test? (y/N): "
+    read -r confirm
+
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+        print_info "Test cancelled"
+        return 0
+    fi
+
+    echo
+    print_info "Running test update..."
+
+    # Run the enhanced update function
+    enhanced_one_click_update
+
+    echo
+    print_success "Test completed. Check the output above for any issues."
+}
+
+# Handle scheduled update command line arguments
+handle_scheduled_update() {
+    local target="$1"
+
+    # Set up logging
+    exec 1> >(tee -a /tmp/dockease-cron.log)
+    exec 2>&1
+
+    echo "$(date): Starting scheduled update for: $target"
+
+    if [[ "$target" == "ALL" ]]; then
+        # Update all containers
+        if [[ ! -f "$CONFIG_FILE" ]] || ! validate_config; then
+            echo "$(date): ERROR - No valid configuration file found"
+            return 1
+        fi
+
+        local containers
+        containers=$(jq -r '.containers | keys[]' "$CONFIG_FILE" 2>/dev/null)
+
+        if [[ -z "$containers" ]]; then
+            echo "$(date): WARNING - No container configurations found"
+            return 0
+        fi
+
+        local success_count=0
+        local total_count=0
+
+        while IFS= read -r container; do
+            ((total_count++))
+            echo "$(date): Updating container: $container"
+            if update_single_container "$container" >/dev/null 2>&1; then
+                ((success_count++))
+                echo "$(date): SUCCESS - Updated: $container"
+            else
+                echo "$(date): ERROR - Failed to update: $container"
+            fi
+        done <<< "$containers"
+
+        echo "$(date): Scheduled update completed: $success_count/$total_count containers updated"
+    else
+        # Update single container
+        echo "$(date): Updating single container: $target"
+        if update_single_container "$target" >/dev/null 2>&1; then
+            echo "$(date): SUCCESS - Updated: $target"
+        else
+            echo "$(date): ERROR - Failed to update: $target"
+        fi
     fi
 }
 
@@ -2404,7 +3003,7 @@ main() {
         # Get user input directly
         echo
         echo "════════════════════════════════════════════════════════════════"
-        echo "  Please enter your choice (0-21):"
+        echo "  Please enter your choice (0-23):"
         echo "════════════════════════════════════════════════════════════════"
         echo -n "  ► Enter number: "
         read choice
@@ -2485,29 +3084,40 @@ main() {
                 read -p "Press Enter to continue..."
                 ;;
             12)
-                # One-click rebuild
+                # Enhanced one-click update
+                clear
+                enhanced_one_click_update
+                read -p "Press Enter to continue..."
+                ;;
+            13)
+                # One-click rebuild (legacy)
                 clear
                 one_click_rebuild
                 read -p "Press Enter to continue..."
                 ;;
-            13)
+            14)
                 # Manage build configs
                 clear
                 manage_build_configs
                 ;;
-            14)
+            15)
+                # Scheduled updates
+                clear
+                manage_scheduled_updates
+                ;;
+            16)
                 # Clean dangling images
                 clear
                 clean_dangling_images
                 read -p "Press Enter to continue..."
                 ;;
-            15)
+            17)
                 # System prune
                 clear
                 system_cleanup
                 read -p "Press Enter to continue..."
                 ;;
-            16)
+            18)
                 # Full cleanup
                 clear
                 print_header "Full Cleanup"
@@ -2530,7 +3140,7 @@ main() {
                 fi
                 read -p "Press Enter to continue..."
                 ;;
-            17)
+            19)
                 # View configuration
                 clear
                 print_header "Current Configuration"
@@ -2546,7 +3156,7 @@ main() {
                 echo
                 read -p "Press Enter to continue..."
                 ;;
-            18)
+            20)
                 # Reset configuration
                 clear
                 print_header "Reset Configuration"
@@ -2562,7 +3172,7 @@ main() {
                 fi
                 read -p "Press Enter to continue..."
                 ;;
-            19)
+            21)
                 # View logs
                 clear
                 print_header "Recent Logs"
@@ -2574,18 +3184,18 @@ main() {
                 echo
                 read -p "Press Enter to continue..."
                 ;;
-            20)
+            22)
                 # Show help
                 show_help
                 read -p "Press Enter to continue..."
                 ;;
-            21)
+            23)
                 # About DockEase
                 show_about
                 read -p "Press Enter to continue..."
                 ;;
             *)
-                print_error "Invalid choice. Please select 0-21."
+                print_error "Invalid choice. Please select 0-23."
                 show_navigation_help
                 read -p "Press Enter to continue..."
                 ;;
@@ -2597,9 +3207,36 @@ main() {
 # SCRIPT ENTRY POINT
 #===============================================================================
 
-# Check if script is being sourced or executed
+# {{ AURA-X:
+# Action: "Modified"
+# Task_ID: "#DOCKEASE-003"
+# Timestamp: "2025-07-29T09:57:17+08:00"
+# Authoring_Role: "LD"
+# Principle_Applied: "SOLID-S (Single Responsibility Principle)"
+# Approval: "inch stop (ID:2025-07-29T09:57:17+08:00)"
+#}}
+# {{START_MODIFICATIONS}}
+
+# Handle command line arguments for scheduled updates
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    main "$@"
+    case "${1:-}" in
+        --scheduled-update)
+            if [[ -n "${2:-}" ]]; then
+                handle_scheduled_update "$2"
+            else
+                echo "Error: Container name required for --scheduled-update"
+                exit 1
+            fi
+            ;;
+        --scheduled-update-all)
+            handle_scheduled_update "ALL"
+            ;;
+        *)
+            main "$@"
+            ;;
+    esac
 fi
+
+# {{END_MODIFICATIONS}}
 
 # {{END_MODIFICATIONS}}
