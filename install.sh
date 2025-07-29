@@ -9,7 +9,7 @@
 set -uo pipefail
 
 # 配置
-DOCKEASE_URL="https://raw.githubusercontent.com/NekoNuo/DockEase/main/dockease.sh"
+DOCKEASE_URL="https://cdn.jsdelivr.net/gh/NekoNuo/DockEase@main/dockease.sh"
 INSTALL_DIR="/usr/local/bin"
 SCRIPT_NAME="dockease"
 
