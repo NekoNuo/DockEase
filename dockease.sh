@@ -512,15 +512,21 @@ add_container_config() {
 
     if command -v jq &> /dev/null; then
         local temp_file=$(mktemp)
-        local config_update="{
-            \"image\": \"$image\",
-            \"build_cmd\": \"${build_cmd:-}\",
-            \"run_cmd\": \"${run_cmd:-}\",
-            \"description\": \"${description:-}\",
-            \"created\": \"$(date -Iseconds)\"
-        }"
 
-        if jq ".containers.\"$name\" = $config_update" "$CONFIG_FILE" > "$temp_file" && mv "$temp_file" "$CONFIG_FILE"; then
+        # Use jq --arg to safely pass variables (avoids JSON escaping issues)
+        if jq --arg name "$name" \
+              --arg image "$image" \
+              --arg build_cmd "${build_cmd:-}" \
+              --arg run_cmd "${run_cmd:-}" \
+              --arg description "${description:-}" \
+              --arg created "$(date -Iseconds)" \
+              '.containers[$name] = {
+                  "image": $image,
+                  "build_cmd": $build_cmd,
+                  "run_cmd": $run_cmd,
+                  "description": $description,
+                  "created": $created
+              }' "$CONFIG_FILE" > "$temp_file" && mv "$temp_file" "$CONFIG_FILE"; then
             print_success "Container configuration added: $name"
             log_info "Container configuration added: $name"
         else
@@ -1616,8 +1622,13 @@ add_build_config() {
     echo
     echo "Enter the complete docker run command:"
     echo "Example: docker run -d -p 3000:3000 --name docs dockerpull.lucky619.me/gys619/docs-system:latest"
-    echo -n "Run command: "
-    read -r run_cmd
+    echo
+    echo "You can paste multi-line commands directly. Press Ctrl+D when finished."
+    echo
+    echo "Run command:"
+
+    # Use cat to read multi-line input until EOF (Ctrl+D)
+    run_cmd=$(cat | tr '\n' ' ' | sed 's/\\[[:space:]]*/ /g' | sed 's/[[:space:]]\+/ /g' | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
 
     if [[ -z "$run_cmd" ]]; then
         print_error "Run command is required"
@@ -1634,8 +1645,15 @@ add_build_config() {
     echo "Configuration Summary:"
     echo "  Container: $container_name"
     echo "  Image: $image_name"
-    echo "  Run Command: $run_cmd"
     echo "  Description: ${description:-None}"
+    echo
+    echo "  Run Command:"
+    # Format long command for better readability
+    if [[ ${#run_cmd} -gt 80 ]]; then
+        echo "    $(echo "$run_cmd" | fold -w 76 -s | sed '2,$s/^/    /')"
+    else
+        echo "    $run_cmd"
+    fi
     echo
 
     echo -n "Save this configuration? (y/N): "
