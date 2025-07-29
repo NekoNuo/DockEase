@@ -114,17 +114,155 @@ show_usage() {
     echo
 }
 
+# 检查是否已安装
+check_existing_installation() {
+    if [[ -f "$INSTALL_DIR/$SCRIPT_NAME" ]]; then
+        return 0  # 已安装
+    else
+        return 1  # 未安装
+    fi
+}
+
+# 获取当前版本
+get_current_version() {
+    if [[ -f "$INSTALL_DIR/$SCRIPT_NAME" ]]; then
+        grep "^SCRIPT_VERSION=" "$INSTALL_DIR/$SCRIPT_NAME" | head -1 | cut -d'"' -f2
+    else
+        echo ""
+    fi
+}
+
+# 获取远程版本
+get_remote_version() {
+    local temp_file=$(mktemp)
+    if $DOWNLOAD_CMD "$DOCKEASE_URL" > "$temp_file" 2>/dev/null; then
+        grep "^SCRIPT_VERSION=" "$temp_file" | head -1 | cut -d'"' -f2
+        rm -f "$temp_file"
+    else
+        rm -f "$temp_file"
+        echo ""
+    fi
+}
+
+# 更新现有安装
+update_dockease() {
+    print_info "正在更新 DockEase..."
+
+    local current_version=$(get_current_version)
+    local remote_version=$(get_remote_version)
+
+    if [[ -z "$remote_version" ]]; then
+        print_error "无法获取远程版本信息"
+        return 1
+    fi
+
+    print_info "当前版本: ${current_version:-未知}"
+    print_info "最新版本: $remote_version"
+
+    if [[ "$current_version" == "$remote_version" ]]; then
+        print_success "您已经在使用最新版本！"
+        return 0
+    fi
+
+    # 备份当前版本
+    local backup_path="$INSTALL_DIR/${SCRIPT_NAME}.backup.$(date +%Y%m%d_%H%M%S)"
+    if [[ -f "$INSTALL_DIR/$SCRIPT_NAME" ]]; then
+        print_info "备份当前版本到: $backup_path"
+        if ! $SUDO_CMD cp "$INSTALL_DIR/$SCRIPT_NAME" "$backup_path"; then
+            print_warning "备份失败，继续更新..."
+        fi
+    fi
+
+    # 执行更新
+    install_dockease
+
+    print_success "更新完成！从 $current_version 更新到 $remote_version"
+}
+
 # 主函数
 main() {
-    echo "🐳 DockEase 一键安装脚本"
-    echo "=========================="
+    # 解析命令行参数
+    local action="install"
+    case "${1:-}" in
+        --update|-u)
+            action="update"
+            ;;
+        --help|-h)
+            show_help
+            exit 0
+            ;;
+        --version|-v)
+            show_version
+            exit 0
+            ;;
+    esac
+
+    if [[ "$action" == "update" ]]; then
+        echo "🔄 DockEase 更新脚本"
+        echo "===================="
+        echo
+
+        if ! check_existing_installation; then
+            print_error "未找到现有安装，请先运行安装"
+            echo "运行: curl -fsSL https://raw.githubusercontent.com/NekoNuo/DockEase/main/install.sh | bash"
+            exit 1
+        fi
+
+        check_dependencies
+        update_dockease
+    else
+        echo "🐳 DockEase 一键安装脚本"
+        echo "=========================="
+        echo
+
+        if check_existing_installation; then
+            local current_version=$(get_current_version)
+            print_warning "检测到已安装的 DockEase (版本: ${current_version:-未知})"
+            echo -n "是否要更新到最新版本？(y/N): "
+            read -r update_confirm
+            if [[ "$update_confirm" =~ ^[Yy]$ ]]; then
+                check_dependencies
+                update_dockease
+                exit 0
+            else
+                print_info "保持当前版本"
+                exit 0
+            fi
+        fi
+
+        check_dependencies
+        install_dockease
+        show_usage
+
+        print_success "安装完成！现在可以运行 '$SCRIPT_NAME' 开始使用"
+    fi
+}
+
+# 显示帮助信息
+show_help() {
+    echo "DockEase 安装/更新脚本"
     echo
-    
-    check_dependencies
-    install_dockease
-    show_usage
-    
-    print_success "安装完成！现在可以运行 '$SCRIPT_NAME' 开始使用"
+    echo "用法:"
+    echo "  curl -fsSL https://raw.githubusercontent.com/NekoNuo/DockEase/main/install.sh | bash"
+    echo "  curl -fsSL https://raw.githubusercontent.com/NekoNuo/DockEase/main/install.sh | bash -s -- --update"
+    echo
+    echo "选项:"
+    echo "  --update, -u    更新现有安装"
+    echo "  --help, -h      显示此帮助信息"
+    echo "  --version, -v   显示版本信息"
+    echo
+    echo "示例:"
+    echo "  # 安装 DockEase"
+    echo "  curl -fsSL https://raw.githubusercontent.com/NekoNuo/DockEase/main/install.sh | bash"
+    echo
+    echo "  # 更新 DockEase"
+    echo "  curl -fsSL https://raw.githubusercontent.com/NekoNuo/DockEase/main/install.sh | bash -s -- --update"
+}
+
+# 显示版本信息
+show_version() {
+    echo "DockEase 安装脚本 v1.2.0"
+    echo "项目地址: https://github.com/NekoNuo/DockEase"
 }
 
 # 执行主函数
