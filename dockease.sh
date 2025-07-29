@@ -26,7 +26,7 @@ set -uo pipefail  # Exit on undefined vars, pipe failures (but not on command er
 #===============================================================================
 
 readonly SCRIPT_NAME="DockEase"
-readonly SCRIPT_VERSION="1.0.0"
+readonly SCRIPT_VERSION="1.2.0"
 readonly CONFIG_FILE=".dockease.json"
 readonly LOG_FILE=".dockease.log"
 
