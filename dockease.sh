@@ -224,11 +224,12 @@ show_main_menu() {
     echo "   19) View configuration"
     echo "   20) Reset configuration"
     echo "   21) View logs"
+    echo "   22) Check for updates"
     echo
 
     print_color "$WHITE" "  ${INFO} Help & Info:"
-    echo "   22) Show help"
-    echo "   23) About DockEase"
+    echo "   23) Show help"
+    echo "   24) About DockEase"
     echo
 
     print_color "$DIM" "   0) Exit"
@@ -1800,6 +1801,51 @@ edit_build_config() {
 #}}
 # {{START_MODIFICATIONS}}
 
+# Parse multiple selection input (e.g., "1,3,5" or "1-3,5")
+parse_multi_selection() {
+    local input="$1"
+    local max_num="$2"
+    local -n result_array="$3"
+
+    # Clear result array
+    result_array=()
+
+    # Remove spaces and split by comma
+    local selections=($(echo "$input" | tr -d ' ' | tr ',' '\n'))
+
+    for selection in "${selections[@]}"; do
+        if [[ "$selection" =~ ^[0-9]+$ ]]; then
+            # Single number
+            if [[ $selection -ge 1 && $selection -le $max_num ]]; then
+                result_array+=("$selection")
+            else
+                return 1
+            fi
+        elif [[ "$selection" =~ ^[0-9]+-[0-9]+$ ]]; then
+            # Range (e.g., 1-3)
+            local start=$(echo "$selection" | cut -d'-' -f1)
+            local end=$(echo "$selection" | cut -d'-' -f2)
+
+            if [[ $start -ge 1 && $end -le $max_num && $start -le $end ]]; then
+                for ((i=start; i<=end; i++)); do
+                    result_array+=("$i")
+                done
+            else
+                return 1
+            fi
+        else
+            return 1
+        fi
+    done
+
+    # Remove duplicates and sort
+    local -a unique_array
+    readarray -t unique_array < <(printf '%s\n' "${result_array[@]}" | sort -nu)
+    result_array=("${unique_array[@]}")
+
+    return 0
+}
+
 # Enhanced one-click update with batch support
 enhanced_one_click_update() {
     print_header "Enhanced One-Click Update"
@@ -1841,10 +1887,11 @@ enhanced_one_click_update() {
     done <<< "$containers"
 
     echo "  $count) Update ALL containers"
+    echo "  $(($count+1))) Multiple selection mode"
     echo "  0) Cancel"
     echo
 
-    echo -n "Select configuration to update [0-$count]: "
+    echo -n "Select configuration to update [0-$(($count+1))]: "
     read -r selection
 
     if [[ "$selection" == "0" ]]; then
@@ -1852,7 +1899,71 @@ enhanced_one_click_update() {
         return 0
     fi
 
-    # Handle batch update
+    # Handle multiple selection mode
+    if [[ "$selection" == "$(($count+1))" ]]; then
+        echo
+        print_header "Multiple Selection Mode"
+        echo "Enter container numbers separated by commas (e.g., 1,3,5) or ranges (e.g., 1-3,5):"
+        echo
+
+        # Show containers again with numbers
+        local idx=1
+        while IFS= read -r container; do
+            local image=$(jq -r ".containers.\"$container\".image" "$CONFIG_FILE")
+            echo "  $idx) $container (Image: $image)"
+            ((idx++))
+        done <<< "$containers"
+
+        echo
+        echo -n "Enter selection: "
+        read -r multi_selection
+
+        if [[ -z "$multi_selection" ]]; then
+            print_error "No selection provided"
+            return 1
+        fi
+
+        # Parse multiple selection
+        local -a selected_containers
+        if ! parse_multi_selection "$multi_selection" "${#config_array[@]}" selected_containers; then
+            print_error "Invalid selection format"
+            return 1
+        fi
+
+        # Show selected containers for confirmation
+        echo
+        echo "Selected containers for update:"
+        for idx in "${selected_containers[@]}"; do
+            echo "  - ${config_array[$((idx-1))]}"
+        done
+        echo
+
+        echo -n "Proceed with updating ${#selected_containers[@]} containers? (y/N): "
+        read -r confirm
+        if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+            print_info "Multi-container update cancelled"
+            return 0
+        fi
+
+        # Update selected containers
+        local success_count=0
+        for idx in "${selected_containers[@]}"; do
+            local container="${config_array[$((idx-1))]}"
+            echo
+            echo "═══════════════════════════════════════════════════════════════"
+            print_info "Updating container: $container"
+            if update_single_container "$container"; then
+                ((success_count++))
+            fi
+        done
+
+        echo
+        echo "═══════════════════════════════════════════════════════════════"
+        print_info "Multi-container update completed: $success_count/${#selected_containers[@]} containers updated successfully"
+        return 0
+    fi
+
+    # Handle batch update (all containers)
     if [[ "$selection" == "$count" ]]; then
         echo
         print_warning "This will update ALL configured containers!"
@@ -2558,6 +2669,151 @@ handle_scheduled_update() {
     fi
 }
 
+# {{ AURA-X:
+# Action: "Added"
+# Task_ID: "#DOCKEASE-004"
+# Timestamp: "2025-07-29T10:17:43+08:00"
+# Authoring_Role: "LD"
+# Principle_Applied: "SOLID-S (Single Responsibility Principle)"
+# Approval: "inch stop (ID:2025-07-29T10:17:43+08:00)"
+#}}
+# {{START_MODIFICATIONS}}
+
+# Check for DockEase updates
+check_for_updates() {
+    print_header "Check for DockEase Updates"
+
+    # Check if we have internet connectivity
+    if ! ping -c 1 github.com &>/dev/null; then
+        print_error "No internet connection available"
+        return 1
+    fi
+
+    # Get current version
+    local current_version="$SCRIPT_VERSION"
+    print_info "Current version: $current_version"
+
+    # Download latest version info
+    print_info "Checking for updates..."
+    local remote_url="https://raw.githubusercontent.com/NekoNuo/DockEase/main/dockease.sh"
+    local temp_file=$(mktemp)
+
+    if ! curl -fsSL "$remote_url" -o "$temp_file" 2>/dev/null; then
+        print_error "Failed to check for updates"
+        rm -f "$temp_file"
+        return 1
+    fi
+
+    # Extract remote version
+    local remote_version
+    remote_version=$(grep "^SCRIPT_VERSION=" "$temp_file" | head -1 | cut -d'"' -f2)
+
+    if [[ -z "$remote_version" ]]; then
+        print_error "Failed to determine remote version"
+        rm -f "$temp_file"
+        return 1
+    fi
+
+    print_info "Latest version: $remote_version"
+
+    # Compare versions
+    if [[ "$current_version" == "$remote_version" ]]; then
+        print_success "You are running the latest version!"
+        rm -f "$temp_file"
+        return 0
+    fi
+
+    echo
+    print_warning "A new version is available: $remote_version"
+    echo
+
+    # Check if this is a system installation
+    local script_path
+    if [[ -n "${BASH_SOURCE[0]}" ]]; then
+        script_path="$(realpath "${BASH_SOURCE[0]}")"
+    else
+        print_error "Cannot determine script location"
+        rm -f "$temp_file"
+        return 1
+    fi
+
+    local is_system_install=false
+    if [[ "$script_path" == "/usr/local/bin/dockease" ]] || [[ "$script_path" == "/usr/bin/dockease" ]]; then
+        is_system_install=true
+    fi
+
+    if [[ "$is_system_install" == "true" ]]; then
+        echo "System installation detected at: $script_path"
+        echo -n "Would you like to update now? (y/N): "
+        read -r confirm
+
+        if [[ "$confirm" =~ ^[Yy]$ ]]; then
+            update_system_installation "$temp_file" "$script_path"
+        else
+            print_info "Update cancelled"
+        fi
+    else
+        echo "Local installation detected at: $script_path"
+        echo "To update, please run:"
+        echo "  curl -fsSL $remote_url -o \"$script_path\""
+        echo "  chmod +x \"$script_path\""
+    fi
+
+    rm -f "$temp_file"
+}
+
+# Update system installation
+update_system_installation() {
+    local temp_file="$1"
+    local script_path="$2"
+
+    print_info "Updating DockEase..."
+
+    # Check if we need sudo
+    local sudo_cmd=""
+    if [[ ! -w "$script_path" ]]; then
+        sudo_cmd="sudo"
+        print_info "Administrator privileges required for system update"
+    fi
+
+    # Backup current version
+    local backup_path="${script_path}.backup.$(date +%Y%m%d_%H%M%S)"
+    if $sudo_cmd cp "$script_path" "$backup_path"; then
+        print_info "Current version backed up to: $backup_path"
+    else
+        print_warning "Failed to create backup, continuing anyway..."
+    fi
+
+    # Install new version
+    if $sudo_cmd cp "$temp_file" "$script_path" && $sudo_cmd chmod +x "$script_path"; then
+        print_success "DockEase updated successfully!"
+        echo
+        print_info "Changes will take effect on next run"
+        echo -n "Restart DockEase now? (y/N): "
+        read -r restart_confirm
+
+        if [[ "$restart_confirm" =~ ^[Yy]$ ]]; then
+            print_info "Restarting DockEase..."
+            exec "$script_path"
+        fi
+    else
+        print_error "Failed to update DockEase"
+
+        # Restore backup if available
+        if [[ -f "$backup_path" ]]; then
+            print_info "Restoring backup..."
+            if $sudo_cmd cp "$backup_path" "$script_path"; then
+                print_info "Backup restored successfully"
+            else
+                print_error "Failed to restore backup"
+            fi
+        fi
+        return 1
+    fi
+}
+
+# {{END_MODIFICATIONS}}
+
 # Manage build configurations
 manage_build_configs() {
     print_header "Manage Build Configurations"
@@ -3003,7 +3259,7 @@ main() {
         # Get user input directly
         echo
         echo "════════════════════════════════════════════════════════════════"
-        echo "  Please enter your choice (0-23):"
+        echo "  Please enter your choice (0-24):"
         echo "════════════════════════════════════════════════════════════════"
         echo -n "  ► Enter number: "
         read choice
@@ -3185,17 +3441,23 @@ main() {
                 read -p "Press Enter to continue..."
                 ;;
             22)
+                # Check for updates
+                clear
+                check_for_updates
+                read -p "Press Enter to continue..."
+                ;;
+            23)
                 # Show help
                 show_help
                 read -p "Press Enter to continue..."
                 ;;
-            23)
+            24)
                 # About DockEase
                 show_about
                 read -p "Press Enter to continue..."
                 ;;
             *)
-                print_error "Invalid choice. Please select 0-23."
+                print_error "Invalid choice. Please select 0-24."
                 show_navigation_help
                 read -p "Press Enter to continue..."
                 ;;

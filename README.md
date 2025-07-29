@@ -62,9 +62,10 @@ chmod +x dockease.sh
 
 ### 🔧 配置管理
 - **添加配置**: 保存容器运行配置
-- **增强一键更新**: pull → stop → rm → run 完整流程，支持批量更新
+- **增强一键更新**: pull → stop → rm → run 完整流程，支持单个/多选/批量更新
 - **定时更新**: 设置cron定时任务自动更新容器
 - **管理配置**: 编辑、删除、导入导出配置
+- **自动更新**: 检查并更新DockEase本身到最新版本
 
 ### 🧹 系统清理
 - **清理悬空镜像**: 删除 `<none>` 标签镜像
@@ -91,11 +92,17 @@ chmod +x dockease.sh
 
 # 增强一键更新容器
 选择 "12) Enhanced one-click update"
-选择已配置的容器进行更新，或选择更新所有容器
+- 单个更新：选择特定容器
+- 多选更新：选择"Multiple selection mode"，输入如"1,3,5"或"1-3,5"
+- 批量更新：选择"Update ALL containers"
 
 # 设置定时更新
 选择 "15) Scheduled updates"
 按向导设置定时任务，支持每日/每周/每月或自定义频率
+
+# 检查DockEase更新
+选择 "22) Check for updates"
+自动检查并更新DockEase到最新版本
 ```
 
 ## 📁 项目结构
@@ -200,13 +207,13 @@ wget https://raw.githubusercontent.com/NekoNuo/DockEase/main/dockease.sh
    18) Full cleanup
 
   📚 Help & Info:
-   22) Help
-   23) About
+   23) Help
+   24) About
 
   🚪 Exit:
     0) Exit
 
-Enter your choice [0-23]:
+Enter your choice [0-24]:
 ```
 
 ## 🌟 高级功能
@@ -270,6 +277,14 @@ done
 ```
 
 ## 📝 更新记录
+
+### v1.2.0 (2025-07-29)
+#### 🆕 新增功能
+- **多选更新模式**: 增强一键更新支持多选容器（如：1,3,5 或 1-3,5）
+- **自动更新系统**: 检查并自动更新DockEase到最新版本
+  - 支持系统安装版本的一键更新
+  - 自动备份当前版本
+  - 更新失败时自动恢复
 
 ### v1.1.0 (2025-07-29)
 #### 🆕 新增功能
