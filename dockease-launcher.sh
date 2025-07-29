@@ -8,7 +8,7 @@
 set -uo pipefail
 
 # 配置
-DOCKEASE_URL="https://raw.githubusercontent.com/your-username/dockease/main/dockease.sh"
+DOCKEASE_URL="https://raw.githubusercontent.com/NekoNuo/DockEase/refs/heads/main/dockease.sh"
 CACHE_DIR="$HOME/.cache/dockease"
 CACHE_FILE="$CACHE_DIR/dockease.sh"
 UPDATE_CHECK_FILE="$CACHE_DIR/last_update"
