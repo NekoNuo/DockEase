@@ -25,10 +25,25 @@ set -uo pipefail  # Exit on undefined vars, pipe failures (but not on command er
 # GLOBAL VARIABLES AND CONFIGURATION
 #===============================================================================
 
+# {{ AURA-X:
+# Action: "Modified"
+# Task_ID: "#DOCKEASE-006"
+# Timestamp: "2025-07-29T12:59:22+08:00"
+# Authoring_Role: "LD"
+# Principle_Applied: "SOLID-S (Single Responsibility Principle)"
+# Approval: "inch stop (ID:2025-07-29T12:59:22+08:00)"
+#}}
+# {{START_MODIFICATIONS}}
+
 readonly SCRIPT_NAME="DockEase"
 readonly SCRIPT_VERSION="1.2.0"
-readonly CONFIG_FILE=".dockease.json"
-readonly LOG_FILE=".dockease.log"
+
+# Get script directory for config file location
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly CONFIG_FILE="$SCRIPT_DIR/.dockease.json"
+readonly LOG_FILE="$SCRIPT_DIR/.dockease.log"
+
+# {{END_MODIFICATIONS}}
 
 #===============================================================================
 # COLOR DEFINITIONS AND STYLING
@@ -2618,7 +2633,17 @@ test_scheduled_update() {
     print_success "Test completed. Check the output above for any issues."
 }
 
-# Handle scheduled update command line arguments
+# {{ AURA-X:
+# Action: "Modified"
+# Task_ID: "#DOCKEASE-005"
+# Timestamp: "2025-07-29T11:13:44+08:00"
+# Authoring_Role: "LD"
+# Principle_Applied: "SOLID-S (Single Responsibility Principle)"
+# Approval: "inch stop (ID:2025-07-29T11:13:44+08:00)"
+#}}
+# {{START_MODIFICATIONS}}
+
+# Handle scheduled update command line arguments with detailed debugging
 handle_scheduled_update() {
     local target="$1"
 
@@ -2627,19 +2652,32 @@ handle_scheduled_update() {
     exec 2>&1
 
     echo "$(date): Starting scheduled update for: $target"
+    echo "$(date): DEBUG - Config file: $CONFIG_FILE"
+    echo "$(date): DEBUG - Working directory: $(pwd)"
+
+    # Check if config file exists
+    if [[ ! -f "$CONFIG_FILE" ]]; then
+        echo "$(date): ERROR - Configuration file not found: $CONFIG_FILE"
+        echo "$(date): DEBUG - Current directory contents:"
+        ls -la
+        return 1
+    fi
+
+    # Validate config file
+    if ! validate_config; then
+        echo "$(date): ERROR - Invalid configuration file format"
+        return 1
+    fi
 
     if [[ "$target" == "ALL" ]]; then
         # Update all containers
-        if [[ ! -f "$CONFIG_FILE" ]] || ! validate_config; then
-            echo "$(date): ERROR - No valid configuration file found"
-            return 1
-        fi
-
         local containers
         containers=$(jq -r '.containers | keys[]' "$CONFIG_FILE" 2>/dev/null)
 
         if [[ -z "$containers" ]]; then
             echo "$(date): WARNING - No container configurations found"
+            echo "$(date): DEBUG - Config file contents:"
+            cat "$CONFIG_FILE"
             return 0
         fi
 
@@ -2649,7 +2687,7 @@ handle_scheduled_update() {
         while IFS= read -r container; do
             ((total_count++))
             echo "$(date): Updating container: $container"
-            if update_single_container "$container" >/dev/null 2>&1; then
+            if update_single_container_with_debug "$container"; then
                 ((success_count++))
                 echo "$(date): SUCCESS - Updated: $container"
             else
@@ -2661,13 +2699,118 @@ handle_scheduled_update() {
     else
         # Update single container
         echo "$(date): Updating single container: $target"
-        if update_single_container "$target" >/dev/null 2>&1; then
+
+        # Check if container exists in config
+        local container_exists
+        container_exists=$(jq -r ".containers.\"$target\"" "$CONFIG_FILE" 2>/dev/null)
+        if [[ "$container_exists" == "null" ]]; then
+            echo "$(date): ERROR - Container '$target' not found in configuration"
+            echo "$(date): DEBUG - Available containers:"
+            jq -r '.containers | keys[]' "$CONFIG_FILE" 2>/dev/null || echo "$(date): ERROR - Failed to read container list"
+            return 1
+        fi
+
+        if update_single_container_with_debug "$target"; then
             echo "$(date): SUCCESS - Updated: $target"
         else
             echo "$(date): ERROR - Failed to update: $target"
         fi
     fi
 }
+
+# Update single container with detailed debugging
+update_single_container_with_debug() {
+    local container_name="$1"
+
+    echo "$(date): DEBUG - Starting update for container: $container_name"
+
+    # Get configuration details
+    local image=$(jq -r ".containers.\"$container_name\".image" "$CONFIG_FILE" 2>/dev/null)
+    local run_cmd=$(jq -r ".containers.\"$container_name\".run_cmd" "$CONFIG_FILE" 2>/dev/null)
+
+    echo "$(date): DEBUG - Image: $image"
+    echo "$(date): DEBUG - Run command: $run_cmd"
+
+    if [[ -z "$run_cmd" || "$run_cmd" == "null" ]]; then
+        echo "$(date): ERROR - No run command configured for: $container_name"
+        return 1
+    fi
+
+    if [[ -z "$image" || "$image" == "null" ]]; then
+        echo "$(date): ERROR - No image configured for: $container_name"
+        return 1
+    fi
+
+    # Extract container name from run command
+    local actual_container_name
+    actual_container_name=$(echo "$run_cmd" | grep -o '\--name [^ ]*' | cut -d' ' -f2)
+    echo "$(date): DEBUG - Actual container name from run_cmd: $actual_container_name"
+
+    if [[ -z "$actual_container_name" ]]; then
+        echo "$(date): WARNING - Could not extract container name from run command"
+        actual_container_name="$container_name"
+    fi
+
+    local update_success=true
+
+    # Step 1: Pull latest image
+    echo "$(date): DEBUG - Step 1/4: Pulling image: $image"
+    if docker pull "$image" 2>&1; then
+        echo "$(date): SUCCESS - Image pulled: $image"
+    else
+        echo "$(date): ERROR - Failed to pull image: $image"
+        update_success=false
+    fi
+
+    # Step 2: Stop existing container
+    echo "$(date): DEBUG - Step 2/4: Stopping container: $actual_container_name"
+    if docker ps -q -f "name=^${actual_container_name}$" | grep -q .; then
+        if docker stop "$actual_container_name" 2>&1; then
+            echo "$(date): SUCCESS - Container stopped: $actual_container_name"
+        else
+            echo "$(date): WARNING - Failed to stop container: $actual_container_name"
+        fi
+    else
+        echo "$(date): INFO - No running container found: $actual_container_name"
+    fi
+
+    # Step 3: Remove existing container
+    echo "$(date): DEBUG - Step 3/4: Removing container: $actual_container_name"
+    if docker ps -a -q -f "name=^${actual_container_name}$" | grep -q .; then
+        if docker rm "$actual_container_name" 2>&1; then
+            echo "$(date): SUCCESS - Container removed: $actual_container_name"
+        else
+            echo "$(date): ERROR - Failed to remove container: $actual_container_name"
+            update_success=false
+        fi
+    else
+        echo "$(date): INFO - No existing container found: $actual_container_name"
+    fi
+
+    # Step 4: Start new container
+    if [[ "$update_success" == "true" ]]; then
+        echo "$(date): DEBUG - Step 4/4: Starting new container"
+        echo "$(date): DEBUG - Executing: $run_cmd"
+        if eval "$run_cmd" 2>&1; then
+            echo "$(date): SUCCESS - Container started: $actual_container_name"
+        else
+            echo "$(date): ERROR - Failed to start container with command: $run_cmd"
+            update_success=false
+        fi
+    else
+        echo "$(date): DEBUG - Step 4/4: Skipping container start due to previous errors"
+    fi
+
+    if [[ "$update_success" == "true" ]]; then
+        echo "$(date): SUCCESS - Update completed for: $container_name"
+        return 0
+    else
+        echo "$(date): ERROR - Update failed for: $container_name"
+        return 1
+    fi
+}
+
+# {{END_MODIFICATIONS}}
 
 # {{ AURA-X:
 # Action: "Added"
