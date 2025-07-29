@@ -91,7 +91,7 @@ main() {
     echo "========================"
     echo
     
-    local base_url="https://raw.githubusercontent.com/NekoNuo/DockEase/refs/heads/main"
+    local base_url="https://raw.githubusercontent.com/NekoNuo/DockEase/main"
     local failed=0
     
     # 测试主脚本

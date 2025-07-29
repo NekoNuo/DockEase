@@ -9,7 +9,7 @@
 set -uo pipefail
 
 # 配置
-DOCKEASE_URL="https://raw.githubusercontent.com/NekoNuo/DockEase/refs/heads/main/dockease.sh"
+DOCKEASE_URL="https://raw.githubusercontent.com/NekoNuo/DockEase/main/dockease.sh"
 
 # 颜色定义
 RED='\033[0;31m'

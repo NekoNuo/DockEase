@@ -22,7 +22,7 @@ DockEase 是一个用纯 Shell 脚本编写的 Docker 管理工具，提供直�
 ### 方式1: 一键安装（推荐）
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/NekoNuo/DockEase/refs/heads/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/NekoNuo/DockEase/main/install.sh | bash
 ```
 
 安装后直接使用：
@@ -33,13 +33,13 @@ dockease
 ### 方式2: 直接运行（无需安装）
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/NekoNuo/DockEase/refs/heads/main/dockease.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/NekoNuo/DockEase/main/dockease.sh)
 ```
 
 ### 方式3: 下载到本地
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/NekoNuo/DockEase/refs/heads/main/dockease.sh -o dockease.sh
+curl -fsSL https://raw.githubusercontent.com/NekoNuo/DockEase/main/dockease.sh -o dockease.sh
 chmod +x dockease.sh
 ./dockease.sh
 ```
@@ -158,7 +158,7 @@ newgrp docker
 export https_proxy=http://proxy:port
 
 # 或直接下载文件
-wget https://raw.githubusercontent.com/NekoNuo/DockEase/refs/heads/main/dockease.sh
+wget https://raw.githubusercontent.com/NekoNuo/DockEase/main/dockease.sh
 ```
 
 ## 📊 功能演示
@@ -259,4 +259,4 @@ done
 
 **⭐ 如果这个项目对您有帮助，请给个 Star！**
 
-**🔗 快速开始**: `curl -fsSL https://raw.githubusercontent.com/NekoNuo/DockEase/refs/heads/main/install.sh | bash`
+**🔗 快速开始**: `curl -fsSL https://raw.githubusercontent.com/NekoNuo/DockEase/main/install.sh | bash`
