@@ -126,7 +126,18 @@ check_existing_installation() {
 # 获取当前版本
 get_current_version() {
     if [[ -f "$INSTALL_DIR/$SCRIPT_NAME" ]]; then
-        grep "^SCRIPT_VERSION=" "$INSTALL_DIR/$SCRIPT_NAME" | head -1 | cut -d'"' -f2
+        local version=$(grep "^SCRIPT_VERSION=" "$INSTALL_DIR/$SCRIPT_NAME" 2>/dev/null | head -1 | cut -d'"' -f2)
+        if [[ -n "$version" ]]; then
+            echo "$version"
+        else
+            # 兼容旧版本，尝试从注释中获取版本信息
+            local old_version=$(grep -i "version\|v[0-9]" "$INSTALL_DIR/$SCRIPT_NAME" | head -1 | grep -o "v\?[0-9]\+\.[0-9]\+\.[0-9]\+" | head -1)
+            if [[ -n "$old_version" ]]; then
+                echo "$old_version"
+            else
+                echo "legacy"  # 标记为旧版本
+            fi
+        fi
     else
         echo ""
     fi
@@ -156,12 +167,23 @@ update_dockease() {
         return 1
     fi
 
-    print_info "当前版本: ${current_version:-未知}"
+    # 处理版本显示
+    local current_display="$current_version"
+    if [[ -z "$current_version" ]]; then
+        current_display="未知"
+    elif [[ "$current_version" == "legacy" ]]; then
+        current_display="旧版本"
+    fi
+
+    print_info "当前版本: $current_display"
     print_info "最新版本: $remote_version"
 
+    # 如果是旧版本或无法确定版本，强制更新
     if [[ "$current_version" == "$remote_version" ]]; then
         print_success "您已经在使用最新版本！"
         return 0
+    elif [[ "$current_version" == "legacy" ]] || [[ -z "$current_version" ]]; then
+        print_warning "检测到旧版本，建议更新到最新版本"
     fi
 
     # 备份当前版本
@@ -217,17 +239,42 @@ main() {
 
         if check_existing_installation; then
             local current_version=$(get_current_version)
-            print_warning "检测到已安装的 DockEase (版本: ${current_version:-未知})"
-            echo -n "是否要更新到最新版本？(y/N): "
-            read -r update_confirm
-            if [[ "$update_confirm" =~ ^[Yy]$ ]]; then
-                check_dependencies
-                update_dockease
-                exit 0
-            else
-                print_info "保持当前版本"
-                exit 0
+            local current_display="$current_version"
+            if [[ -z "$current_version" ]]; then
+                current_display="未知"
+            elif [[ "$current_version" == "legacy" ]]; then
+                current_display="旧版本"
             fi
+
+            print_warning "检测到已安装的 DockEase (版本: $current_display)"
+
+            # 如果是旧版本，强烈建议更新
+            if [[ "$current_version" == "legacy" ]] || [[ -z "$current_version" ]]; then
+                print_info "检测到旧版本，强烈建议更新以获得最新功能"
+                echo -n "是否要更新到最新版本？(Y/n): "
+            else
+                echo -n "是否要更新到最新版本？(y/N): "
+            fi
+
+            read -r update_confirm
+
+            # 对于旧版本，默认为更新
+            if [[ "$current_version" == "legacy" ]] || [[ -z "$current_version" ]]; then
+                if [[ ! "$update_confirm" =~ ^[Nn]$ ]]; then
+                    check_dependencies
+                    update_dockease
+                    exit 0
+                fi
+            else
+                if [[ "$update_confirm" =~ ^[Yy]$ ]]; then
+                    check_dependencies
+                    update_dockease
+                    exit 0
+                fi
+            fi
+
+            print_info "保持当前版本"
+            exit 0
         fi
 
         check_dependencies
